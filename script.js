@@ -4,8 +4,11 @@ const items = document.querySelector("#items");
 const template = document.querySelector("#item-template");
 const addButton = document.querySelector("#add-item");
 const totalOutput = document.querySelector("#total");
+const discountInput = document.querySelector("#discount");
+const vatInput = document.querySelector("#vat");
+const currencySelect = document.querySelector("#currency");
 const moneyFormatter = new Intl.NumberFormat("ru-RU", {
-  maximumFractionDigits: 2,
+  maximumFractionDigits: 0,
 });
 let nextItemId = 0;
 
@@ -17,8 +20,18 @@ function parseNumber(value) {
 }
 
 function formatMoney(value) {
-  const safeValue = Number.isFinite(value) ? value : 0;
-  return `${moneyFormatter.format(Object.is(safeValue, -0) ? 0 : safeValue).replace(/[\u00a0\u202f]/g, " ")} ₸`;
+  const safeValue = roundAmount(value);
+  return `${moneyFormatter.format(safeValue).replace(/[\u00a0\u202f]/g, " ")} ${currencySelect.value}`;
+}
+
+function roundAmount(value) {
+  const rounded = Number.isFinite(value) ? Math.round(value) : 0;
+  return Object.is(rounded, -0) ? 0 : rounded;
+}
+
+function updateSummaryRow(rowId, outputId, amount) {
+  document.querySelector(rowId).hidden = amount === 0;
+  document.querySelector(outputId).textContent = formatMoney(amount);
 }
 
 function recalculate() {
@@ -26,13 +39,23 @@ function recalculate() {
   for (const row of items.rows) {
     const quantity = parseNumber(row.querySelector('[data-field="quantity"]').value);
     const price = parseNumber(row.querySelector('[data-field="price"]').value);
-    // Округляем каждую строку до тиынов, чтобы итог совпадал с суммой строк.
-    const rounded = Math.round(quantity * price * 100) / 100;
-    const amount = Number.isFinite(rounded) ? rounded : 0;
+    // Считаем целыми денежными единицами, чтобы итог совпадал с суммой строк.
+    const amount = roundAmount(quantity * price);
     row.querySelector('[data-field="sum"]').textContent = formatMoney(amount);
     total += amount;
   }
-  totalOutput.textContent = formatMoney(total);
+  const subtotal = roundAmount(total);
+  const discount = roundAmount(subtotal * (parseNumber(discountInput.value) / 100));
+  const discounted = roundAmount(subtotal - discount);
+  const vat = roundAmount(discounted * (parseNumber(vatInput.value) / 100));
+  document.querySelector("#subtotal").textContent = formatMoney(subtotal);
+  updateSummaryRow("#discount-row", "#discount-amount", discount);
+  updateSummaryRow("#discounted-row", "#discounted-amount", discounted);
+  updateSummaryRow("#vat-row", "#vat-amount", vat);
+  totalOutput.textContent = formatMoney(discounted + vat);
+  for (const symbol of document.querySelectorAll("[data-currency]")) {
+    symbol.textContent = currencySelect.value;
+  }
 }
 
 function addItem(focusName = true) {
@@ -53,6 +76,9 @@ function addItem(focusName = true) {
 }
 
 addButton.addEventListener("click", () => addItem());
+discountInput.addEventListener("input", recalculate);
+vatInput.addEventListener("input", recalculate);
+currencySelect.addEventListener("change", recalculate);
 items.addEventListener("input", recalculate);
 items.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.isComposing && !event.repeat &&
