@@ -52,7 +52,11 @@
         </thead>
         <tbody id="items"></tbody>
       </table>
-      <button type="button" id="add-item" class="add-button">+ Добавить позицию</button>
+      <div class="position-actions">
+        <button type="button" id="add-item" class="add-button">+ Добавить позицию</button>
+        <button type="button" id="open-catalog" class="secondary-button">Каталог</button>
+      </div>
+      <p id="catalog-save-status" class="action-status" role="status"></p>
       <div class="calculation-settings">
         <label for="discount">Скидка, %
           <input type="text" id="discount" inputmode="decimal" value="0" autocomplete="off" spellcheck="false">
@@ -116,11 +120,57 @@
     </div>
   </main>
 
+  <dialog id="catalog-dialog" aria-labelledby="catalog-title">
+    <div class="catalog-heading">
+      <h2 id="catalog-title">Каталог услуг и товаров</h2>
+      <button type="button" id="close-catalog" class="delete-button" aria-label="Закрыть каталог">✕</button>
+    </div>
+    <label for="catalog-search">Поиск по названию</label>
+    <input type="search" id="catalog-search" placeholder="Например, монтаж" autocomplete="off">
+    <p id="catalog-status" class="catalog-status" role="status"></p>
+    <form id="catalog-editor" hidden>
+      <h3>Редактирование товара или услуги</h3>
+      <label for="catalog-name">Наименование</label>
+      <input type="text" id="catalog-name" required>
+      <div class="catalog-fields">
+        <label for="catalog-unit">Единица
+          <select id="catalog-unit">
+            <option value="шт">шт</option>
+            <option value="час">час</option>
+            <option value="услуга">услуга</option>
+          </select>
+        </label>
+        <label for="catalog-price">Цена, <span data-currency>₸</span>
+          <input type="text" id="catalog-price" inputmode="decimal" autocomplete="off" spellcheck="false">
+        </label>
+      </div>
+      <div class="catalog-actions">
+        <button type="submit" class="secondary-button">Сохранить изменения</button>
+        <button type="button" id="cancel-catalog-edit" class="secondary-button">Отмена</button>
+      </div>
+    </form>
+    <p id="catalog-empty" class="catalog-empty"></p>
+    <ul id="catalog-list" class="catalog-list"></ul>
+  </dialog>
+
+  <template id="catalog-entry-template">
+    <li class="catalog-entry">
+      <h3 data-catalog-name></h3>
+      <p data-catalog-details></p>
+      <div class="catalog-actions">
+        <button type="button" class="secondary-button" data-catalog-action="add">Добавить в смету</button>
+        <button type="button" class="secondary-button" data-catalog-action="edit">Редактировать</button>
+        <button type="button" class="secondary-button" data-catalog-action="delete">Удалить</button>
+      </div>
+    </li>
+  </template>
+
   <template id="item-template">
     <tr class="item-row">
       <td class="name-cell">
         <label class="cell-label" data-label="name">Наименование</label>
         <input type="text" data-field="name" placeholder="Товар или услуга">
+        <button type="button" class="save-to-catalog secondary-button">Сохранить в каталог</button>
       </td>
       <td>
         <label class="cell-label" data-label="quantity">Количество</label>

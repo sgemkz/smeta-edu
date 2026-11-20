@@ -10,6 +10,13 @@ const currencySelect = document.querySelector("#currency");
 const printButton = document.querySelector("#save-pdf");
 const estimate = document.querySelector(".estimate");
 const draftKey = "smeta-5-minutes-draft-v1";
+const catalogKey = "smeta-5-minutes-catalog-v1";
+const catalogDialog = document.querySelector("#catalog-dialog");
+const catalogSearch = document.querySelector("#catalog-search");
+const catalogList = document.querySelector("#catalog-list");
+const catalogEditor = document.querySelector("#catalog-editor");
+let catalog = [];
+let editingCatalogId = null;
 const savedFields = {
   sender: document.querySelector('[name="sender"]'),
   recipient: document.querySelector('[name="recipient"]'),
@@ -86,7 +93,8 @@ function addItem(focusName = true, values = null) {
   const sumLabel = row.querySelector("[data-sum-label]");
   sumLabel.id = `item-${itemId}-sum-label`;
   row.querySelector('[data-field="sum"]').setAttribute("aria-labelledby", sumLabel.id);
-  row.querySelector("button").setAttribute("aria-label", `Удалить позицию ${itemId}`);
+  row.querySelector(".delete-button").setAttribute("aria-label", `Удалить позицию ${itemId}`);
+  row.querySelector(".save-to-catalog").setAttribute("aria-label", `Сохранить в каталог позицию ${itemId}`);
   items.append(row);
   recalculate();
   saveDraft();
@@ -253,6 +261,144 @@ async function copyEstimate() {
   }
 }
 
+function catalogNotice(message) {
+  document.querySelector("#catalog-status").textContent = message;
+  document.querySelector("#catalog-save-status").textContent = message;
+}
+
+function loadCatalog() {
+  try {
+    const raw = window.localStorage.getItem(catalogKey);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    if (!data || data.version !== 1 || !Array.isArray(data.items) ||
+        !data.items.every((item) => item && typeof item.id === "string" &&
+          typeof item.name === "string" && item.name.trim() && typeof item.price === "string" &&
+          ["шт", "час", "услуга"].includes(item.unit)) ||
+        new Set(data.items.map((item) => item.id)).size !== data.items.length) {
+      catalogNotice("Не удалось прочитать каталог. Смета доступна для работы.");
+      return;
+    }
+    catalog = data.items;
+  } catch {
+    catalogNotice("Каталог недоступен в хранилище браузера. Смета доступна для работы.");
+  }
+}
+
+function storeCatalog(nextCatalog) {
+  try {
+    window.localStorage.setItem(catalogKey, JSON.stringify({ version: 1, items: nextCatalog }));
+    catalog = nextCatalog;
+    return true;
+  } catch {
+    catalogNotice("Не удалось сохранить каталог в браузере. Изменения каталога не сохранены.");
+    return false;
+  }
+}
+
+function renderCatalog() {
+  const query = catalogSearch.value.trim().toLocaleLowerCase("ru");
+  const found = catalog.filter((item) => item.name.toLocaleLowerCase("ru").includes(query));
+  catalogList.replaceChildren();
+  const empty = document.querySelector("#catalog-empty");
+  empty.hidden = found.length > 0;
+  empty.textContent = catalog.length === 0
+    ? "Каталог пока пуст. Заполните наименование, единицу и цену позиции сметы и нажмите «Сохранить в каталог»."
+    : "Ничего не найдено. Попробуйте другое название.";
+  const entryTemplate = document.querySelector("#catalog-entry-template");
+  for (const item of found) {
+    const entry = entryTemplate.content.firstElementChild.cloneNode(true);
+    entry.querySelector("[data-catalog-name]").textContent = item.name;
+    entry.querySelector("[data-catalog-details]").textContent = `${formatMoney(parseNumber(item.price))} / ${item.unit}`;
+    for (const button of entry.querySelectorAll("button")) {
+      button.dataset.catalogId = item.id;
+      button.setAttribute("aria-label", `${button.textContent}: ${item.name}`);
+    }
+    catalogList.append(entry);
+  }
+}
+
+function saveRowToCatalog(row) {
+  const nameField = row.querySelector('[data-field="name"]');
+  const name = nameField.value.trim();
+  if (!name) {
+    catalogNotice("Укажите наименование позиции, чтобы сохранить её в каталог.");
+    nameField.focus();
+    return;
+  }
+  const item = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    name,
+    unit: row.querySelector('[data-field="unit"]').value,
+    price: String(parseNumber(row.querySelector('[data-field="price"]').value)),
+  };
+  if (storeCatalog([...catalog, item])) catalogNotice(`«${name}» сохранено в каталог.`);
+}
+
+function cancelCatalogEdit() {
+  catalogEditor.hidden = true;
+  editingCatalogId = null;
+}
+
+document.querySelector("#open-catalog").addEventListener("click", () => {
+  cancelCatalogEdit();
+  catalogSearch.value = "";
+  renderCatalog();
+  catalogDialog.showModal();
+  catalogSearch.focus();
+});
+document.querySelector("#close-catalog").addEventListener("click", () => catalogDialog.close());
+catalogSearch.addEventListener("input", renderCatalog);
+document.querySelector("#cancel-catalog-edit").addEventListener("click", () => {
+  cancelCatalogEdit();
+  catalogSearch.focus();
+});
+catalogEditor.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const nameField = document.querySelector("#catalog-name");
+  const name = nameField.value.trim();
+  if (!name) {
+    catalogNotice("Укажите наименование товара или услуги.");
+    nameField.focus();
+    return;
+  }
+  if (!catalog.some((item) => item.id === editingCatalogId)) return;
+  const nextCatalog = catalog.map((item) => item.id === editingCatalogId ? {
+    ...item,
+    name,
+    unit: document.querySelector("#catalog-unit").value,
+    price: String(parseNumber(document.querySelector("#catalog-price").value)),
+  } : item);
+  if (!storeCatalog(nextCatalog)) return;
+  cancelCatalogEdit();
+  renderCatalog();
+  catalogNotice("Изменения сохранены в каталог.");
+  catalogSearch.focus();
+});
+catalogList.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-catalog-action]");
+  if (!button) return;
+  const item = catalog.find((entry) => entry.id === button.dataset.catalogId);
+  if (!item) return;
+  if (button.dataset.catalogAction === "add") {
+    addItem(false, { name: item.name, quantity: "1", unit: item.unit, price: item.price });
+    catalogNotice(`«${item.name}» добавлено в смету. Итого: ${totalOutput.textContent}`);
+  } else if (button.dataset.catalogAction === "edit") {
+    editingCatalogId = item.id;
+    catalogEditor.hidden = false;
+    document.querySelector("#catalog-name").value = item.name;
+    document.querySelector("#catalog-unit").value = item.unit;
+    document.querySelector("#catalog-price").value = item.price;
+    document.querySelector("#catalog-name").focus();
+  } else if (button.dataset.catalogAction === "delete") {
+    if (!storeCatalog(catalog.filter((entry) => entry.id !== item.id))) return;
+    if (editingCatalogId === item.id) cancelCatalogEdit();
+    renderCatalog();
+    catalogNotice(`«${item.name}» удалено из каталога.`);
+    catalogSearch.focus();
+  }
+});
+
 document.querySelector("#new-estimate").addEventListener("click", newEstimate);
 document.querySelector("#copy-estimate").addEventListener("click", copyEstimate);
 estimate.addEventListener("input", (event) => {
@@ -272,6 +418,9 @@ addButton.addEventListener("click", () => addItem());
 discountInput.addEventListener("input", recalculate);
 vatInput.addEventListener("input", recalculate);
 currencySelect.addEventListener("change", recalculate);
+currencySelect.addEventListener("change", () => {
+  if (catalogDialog.open) renderCatalog();
+});
 items.addEventListener("input", recalculate);
 items.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.isComposing && !event.repeat &&
@@ -281,6 +430,11 @@ items.addEventListener("keydown", (event) => {
   }
 });
 items.addEventListener("click", (event) => {
+  const saveButton = event.target.closest(".save-to-catalog");
+  if (saveButton) {
+    saveRowToCatalog(saveButton.closest("tr"));
+    return;
+  }
   const button = event.target.closest(".delete-button");
   if (!button) return;
   const row = button.closest("tr");
@@ -297,3 +451,4 @@ if (!restoreDraft()) {
   addItem(false);
 }
 draftReady = true;
+loadCatalog();
