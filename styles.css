@@ -65,8 +65,11 @@ td:last-child, th:last-child { padding-right: 0; }
 .position-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 16px; }
 .position-actions .add-button { margin-top: 0; }
 .save-to-catalog { margin-top: 8px; width: 100%; padding: 8px; font-size: 12px; }
-#catalog-dialog { width: min(720px, calc(100% - 32px)); max-height: calc(100dvh - 32px); padding: 24px; border: 1px solid var(--border); border-radius: 16px; color: var(--text); background: #fff; overflow-y: auto; }
-#catalog-dialog::backdrop { background: rgb(32 41 56 / 45%); }
+#catalog-dialog, #history-dialog, #unsaved-dialog { width: min(720px, calc(100% - 32px)); max-height: calc(100dvh - 32px); padding: 24px; border: 1px solid var(--border); border-radius: 16px; color: var(--text); background: #fff; overflow-y: auto; }
+dialog::backdrop { background: rgb(32 41 56 / 45%); }
+#unsaved-dialog { width: min(520px, calc(100% - 32px)); }
+#unsaved-description { line-height: 1.6; }
+#history-search { margin-top: 8px; }
 .catalog-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
 .catalog-heading button { flex-shrink: 0; }
 #catalog-search { margin-top: 8px; }
@@ -122,7 +125,7 @@ td:last-child, th:last-child { padding-right: 0; }
   .add-button { width: 100%; margin-top: 8px; }
   .document-actions > button { width: 100%; }
   .position-actions > button { width: 100%; }
-  #catalog-dialog { padding: 16px; }
+  #catalog-dialog, #history-dialog, #unsaved-dialog { padding: 16px; }
   .catalog-fields { grid-template-columns: minmax(0, 1fr); }
   .catalog-actions > button { width: 100%; }
   .total-card { padding: 24px 20px; flex-direction: column; align-items: flex-start; gap: 12px; border-radius: 14px; }
@@ -135,7 +138,7 @@ td:last-child, th:last-child { padding-right: 0; }
   :root { color: #000; background: #fff; font-size: 10pt; }
   body { margin: 0; background: #fff; }
   .estimate { width: 100%; margin: 0; padding: 0; }
-  .page-header, button, .document-actions, .calculation-settings, .action-status, .manual-copy, .position-actions, #catalog-dialog,
+  .page-header, button, .document-actions, .calculation-settings, .action-status, .manual-copy, .position-actions, dialog,
   #keyboard-hint, .delete-cell, th:last-child,
   .estimate input, .estimate select, .estimate textarea,
   .cell-label { display: none !important; }

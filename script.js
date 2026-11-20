@@ -11,6 +11,14 @@ const printButton = document.querySelector("#save-pdf");
 const estimate = document.querySelector(".estimate");
 const draftKey = "smeta-5-minutes-draft-v1";
 const catalogKey = "smeta-5-minutes-catalog-v1";
+const historyKey = "smeta-5-minutes-history-v1";
+const historyDialog = document.querySelector("#history-dialog");
+const historySearch = document.querySelector("#history-search");
+const historyList = document.querySelector("#history-list");
+const unsavedDialog = document.querySelector("#unsaved-dialog");
+let estimateHistory = [];
+let activeHistoryId = null;
+let pendingReplacement = null;
 const catalogDialog = document.querySelector("#catalog-dialog");
 const catalogSearch = document.querySelector("#catalog-search");
 const catalogList = document.querySelector("#catalog-list");
@@ -42,9 +50,9 @@ function parseNumber(value) {
   return Number.isFinite(number) ? number : 0;
 }
 
-function formatMoney(value) {
+function formatMoney(value, currency = currencySelect.value) {
   const safeValue = roundAmount(value);
-  return `${moneyFormatter.format(safeValue).replace(/[\u00a0\u202f]/g, " ")} ${currencySelect.value}`;
+  return `${moneyFormatter.format(safeValue).replace(/[\u00a0\u202f]/g, " ")} ${currency}`;
 }
 
 function roundAmount(value) {
@@ -57,6 +65,14 @@ function updateSummaryRow(rowId, outputId, amount) {
   document.querySelector(outputId).textContent = formatMoney(amount);
 }
 
+function calculateAdjustments(amount, discountRate, vatRate) {
+  const subtotal = roundAmount(amount);
+  const discount = roundAmount(subtotal * (parseNumber(discountRate) / 100));
+  const discounted = roundAmount(subtotal - discount);
+  const vat = roundAmount(discounted * (parseNumber(vatRate) / 100));
+  return { subtotal, discount, discounted, vat, total: roundAmount(discounted + vat) };
+}
+
 function recalculate() {
   let total = 0;
   for (const row of items.rows) {
@@ -67,10 +83,7 @@ function recalculate() {
     row.querySelector('[data-field="sum"]').textContent = formatMoney(amount);
     total += amount;
   }
-  const subtotal = roundAmount(total);
-  const discount = roundAmount(subtotal * (parseNumber(discountInput.value) / 100));
-  const discounted = roundAmount(subtotal - discount);
-  const vat = roundAmount(discounted * (parseNumber(vatInput.value) / 100));
+  const { subtotal, discount, discounted, vat } = calculateAdjustments(total, discountInput.value, vatInput.value);
   document.querySelector("#subtotal").textContent = formatMoney(subtotal);
   updateSummaryRow("#discount-row", "#discount-amount", discount);
   updateSummaryRow("#discounted-row", "#discounted-amount", discounted);
@@ -138,15 +151,27 @@ function storageError() {
   status.hidden = false;
 }
 
-function saveDraft() {
-  if (!draftReady) return;
-  const draft = {
+function readSnapshot() {
+  return {
     version: 1,
     fields: Object.fromEntries(Object.entries(savedFields).map(([key, field]) => [key, field.value])),
     items: Array.from(items.rows, (row) => Object.fromEntries(
       Array.from(row.querySelectorAll("input, select"), (field) => [field.dataset.field, field.value])
     )),
   };
+}
+
+function validSnapshot(draft) {
+  return draft && draft.version === 1 && draft.fields && Array.isArray(draft.items) &&
+    Object.keys(savedFields).every((key) => typeof draft.fields[key] === "string") &&
+    ["₸", "₽", "$", "€"].includes(draft.fields.currency) &&
+    draft.items.every((row) => row && ["name", "quantity", "unit", "price"].every((key) => typeof row[key] === "string") &&
+      ["шт", "час", "услуга"].includes(row.unit));
+}
+
+function saveDraft() {
+  if (!draftReady) return;
+  const draft = { ...readSnapshot(), historyId: activeHistoryId };
   try {
     window.localStorage.setItem(draftKey, JSON.stringify(draft));
     document.querySelector("#storage-status").hidden = true;
@@ -166,11 +191,8 @@ function restoreDraft() {
   if (!raw) return false;
   try {
     const draft = JSON.parse(raw);
-    if (!draft || draft.version !== 1 || !draft.fields || !Array.isArray(draft.items) ||
-        !Object.keys(savedFields).every((key) => typeof draft.fields[key] === "string") ||
-        !["₸", "₽", "$", "€"].includes(draft.fields.currency) ||
-        !draft.items.every((row) => row && ["name", "quantity", "unit", "price"].every((key) => typeof row[key] === "string") &&
-          ["шт", "час", "услуга"].includes(row.unit))) return false;
+    if (!validSnapshot(draft)) return false;
+    activeHistoryId = typeof draft.historyId === "string" ? draft.historyId : null;
     for (const [key, field] of Object.entries(savedFields)) field.value = draft.fields[key];
     for (const row of draft.items) addItem(false, row);
     recalculate();
@@ -196,9 +218,9 @@ function resetCopy() {
 function newEstimate() {
   if (!window.confirm("Создать новую смету? Текущий черновик будет очищен.")) return;
   const current = savedFields.number.value.trim();
-  const match = current.match(/^(.*?)(\d+)$/);
-  const nextNumber = match ? match[1] + (BigInt(match[2]) + 1n).toString().padStart(match[2].length, "0") : "1";
+  const nextNumber = nextUniqueNumber(current);
   draftReady = false;
+  activeHistoryId = null;
   for (const field of Object.values(savedFields)) field.value = "";
   savedFields.number.value = nextNumber;
   savedFields.date.value = todayValue();
@@ -260,6 +282,209 @@ async function copyEstimate() {
     field.select();
   }
 }
+
+function historyNotice(message) {
+  document.querySelector("#history-status").textContent = message;
+  document.querySelector("#history-save-status").textContent = message;
+}
+
+function loadHistory() {
+  try {
+    const raw = window.localStorage.getItem(historyKey);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    if (!data || data.version !== 1 || !Array.isArray(data.estimates) ||
+        !data.estimates.every((entry) => entry && typeof entry.id === "string" &&
+          Number.isFinite(entry.updatedAt) && validSnapshot(entry.snapshot)) ||
+        new Set(data.estimates.map((entry) => entry.id)).size !== data.estimates.length) {
+      historyNotice("Не удалось прочитать историю смет. Текущий черновик доступен.");
+      return;
+    }
+    estimateHistory = data.estimates;
+  } catch {
+    historyNotice("История недоступна в хранилище браузера. Текущий черновик доступен.");
+  }
+}
+
+function storeHistory(nextHistory) {
+  try {
+    window.localStorage.setItem(historyKey, JSON.stringify({ version: 1, estimates: nextHistory }));
+    estimateHistory = nextHistory;
+    return true;
+  } catch {
+    historyNotice("Не удалось сохранить историю в браузере. Текущая смета не заменена.");
+    return false;
+  }
+}
+
+function nextUniqueNumber(sourceNumber) {
+  const used = new Set(estimateHistory.map((entry) => entry.snapshot.fields.number.trim()));
+  used.add(savedFields.number.value.trim());
+  const match = sourceNumber.trim().match(/^(.*?)(\d+)$/);
+  const prefix = match ? match[1] : "";
+  const width = match ? match[2].length : 1;
+  let value = match ? BigInt(match[2]) + 1n : 1n;
+  let candidate;
+  do {
+    candidate = prefix + value.toString().padStart(width, "0");
+    value++;
+  } while (used.has(candidate));
+  return candidate;
+}
+
+function historyEntry(snapshot, id = null) {
+  return {
+    id: id || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    updatedAt: Math.max(Date.now(), ...estimateHistory.map((entry) => entry.updatedAt + 1)),
+    snapshot,
+  };
+}
+
+function saveCurrentHistory() {
+  const snapshot = readSnapshot();
+  if (!snapshot.fields.number.trim()) snapshot.fields.number = nextUniqueNumber("0");
+  const existing = estimateHistory.find((entry) => entry.id === activeHistoryId);
+  const entry = historyEntry(snapshot, existing ? existing.id : null);
+  const nextHistory = existing
+    ? estimateHistory.map((item) => item.id === entry.id ? entry : item)
+    : [...estimateHistory, entry];
+  if (!storeHistory(nextHistory)) return false;
+  savedFields.number.value = snapshot.fields.number;
+  activeHistoryId = entry.id;
+  saveDraft();
+  historyNotice(`Смета № ${snapshot.fields.number} сохранена в историю.`);
+  if (historyDialog.open) renderHistory();
+  return true;
+}
+
+function snapshotKey(snapshot) {
+  return JSON.stringify([
+    Object.keys(savedFields).map((key) => snapshot.fields[key]),
+    snapshot.items.map((row) => [row.name, row.quantity, row.unit, row.price]),
+  ]);
+}
+
+function hasUnsavedChanges() {
+  const current = readSnapshot();
+  const saved = estimateHistory.find((entry) => entry.id === activeHistoryId);
+  if (saved) return snapshotKey(current) !== snapshotKey(saved.snapshot);
+  const f = current.fields;
+  return Boolean(f.sender || f.recipient || f.number || f.comment || f.discount !== "0" ||
+    f.vat !== "0" || f.currency !== "₸" || f.date !== todayValue() ||
+    current.items.some((row) => row.name || row.quantity || row.price || row.unit !== "шт"));
+}
+
+function requestDraftReplacement(action) {
+  if (!hasUnsavedChanges()) {
+    action();
+    return;
+  }
+  pendingReplacement = action;
+  document.querySelector("#unsaved-status").textContent = "";
+  unsavedDialog.showModal();
+}
+
+function applyHistorySnapshot(snapshot, id) {
+  draftReady = false;
+  activeHistoryId = id;
+  for (const [key, field] of Object.entries(savedFields)) field.value = snapshot.fields[key];
+  items.replaceChildren();
+  nextItemId = 0;
+  resetCopy();
+  for (const row of snapshot.items) addItem(false, row);
+  recalculate();
+  draftReady = true;
+  saveDraft();
+  historyDialog.close();
+  savedFields.recipient.focus();
+}
+
+function renderHistory() {
+  const query = historySearch.value.trim().toLocaleLowerCase("ru");
+  const found = estimateHistory.filter(({ snapshot }) =>
+    snapshot.fields.number.toLocaleLowerCase("ru").includes(query) ||
+    snapshot.fields.recipient.toLocaleLowerCase("ru").includes(query)
+  ).sort((a, b) => b.updatedAt - a.updatedAt);
+  historyList.replaceChildren();
+  const empty = document.querySelector("#history-empty");
+  empty.hidden = found.length > 0;
+  empty.textContent = estimateHistory.length === 0
+    ? "Здесь пока нет смет. Заполните смету и нажмите «Сохранить в историю»."
+    : "Сметы не найдены. Попробуйте другой номер или название клиента.";
+  for (const entry of found) {
+    const { fields, items: rows } = entry.snapshot;
+    const card = document.querySelector("#history-entry-template").content.firstElementChild.cloneNode(true);
+    const title = `Смета № ${fields.number || "—"} от ${fields.date ? fields.date.split("-").reverse().join(".") : "—"}`;
+    const sum = rows.reduce((amount, row) => amount + roundAmount(parseNumber(row.quantity) * parseNumber(row.price)), 0);
+    const total = calculateAdjustments(sum, fields.discount, fields.vat).total;
+    card.querySelector("[data-history-title]").textContent = title;
+    card.querySelector("[data-history-client]").textContent = `Клиент: ${fields.recipient || "Не указан"}`;
+    card.querySelector("[data-history-total]").textContent = `Итого к оплате: ${formatMoney(total, fields.currency)}`;
+    for (const button of card.querySelectorAll("button")) {
+      button.dataset.historyId = entry.id;
+      button.setAttribute("aria-label", `${button.textContent}: ${title}, ${fields.recipient || "клиент не указан"}`);
+    }
+    historyList.append(card);
+  }
+}
+
+document.querySelector("#save-history").addEventListener("click", saveCurrentHistory);
+document.querySelector("#open-history").addEventListener("click", () => {
+  historySearch.value = "";
+  renderHistory();
+  historyDialog.showModal();
+  historySearch.focus();
+});
+document.querySelector("#close-history").addEventListener("click", () => historyDialog.close());
+historySearch.addEventListener("input", renderHistory);
+document.querySelector("#cancel-replace").addEventListener("click", () => unsavedDialog.close());
+unsavedDialog.addEventListener("close", () => { pendingReplacement = null; });
+document.querySelector("#save-and-continue").addEventListener("click", () => {
+  const action = pendingReplacement;
+  if (!action) return;
+  if (!saveCurrentHistory()) {
+    document.querySelector("#unsaved-status").textContent = "Не удалось сохранить смету. Переход отменён. Закройте это окно, чтобы продолжить работу с черновиком.";
+    return;
+  }
+  pendingReplacement = null;
+  unsavedDialog.close();
+  action();
+});
+historyList.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-history-action]");
+  if (!button) return;
+  const id = button.dataset.historyId;
+  const entry = estimateHistory.find((item) => item.id === id);
+  if (!entry) return;
+  const action = button.dataset.historyAction;
+  if (action === "delete") {
+    if (!window.confirm(`Удалить смету № ${entry.snapshot.fields.number} из истории?`)) return;
+    if (!storeHistory(estimateHistory.filter((item) => item.id !== id))) return;
+    if (activeHistoryId === id) {
+      activeHistoryId = null;
+      saveDraft();
+    }
+    renderHistory();
+    historyNotice("Смета удалена из истории. Текущий черновик сохранён.");
+    historySearch.focus();
+    return;
+  }
+  if (action !== "open" && action !== "copy") return;
+  requestDraftReplacement(() => {
+    const source = estimateHistory.find((item) => item.id === id);
+    if (!source) return;
+    if (action === "open") {
+      applyHistorySnapshot(source.snapshot, id);
+    } else {
+      const snapshot = JSON.parse(JSON.stringify(source.snapshot));
+      snapshot.fields.number = nextUniqueNumber(snapshot.fields.number);
+      const copy = historyEntry(snapshot);
+      if (!storeHistory([...estimateHistory, copy])) return;
+      applyHistorySnapshot(snapshot, copy.id);
+      historyNotice(`Создана копия: смета № ${snapshot.fields.number}.`);
+    }
+  });
+});
 
 function catalogNotice(message) {
   document.querySelector("#catalog-status").textContent = message;
@@ -399,7 +624,7 @@ catalogList.addEventListener("click", (event) => {
   }
 });
 
-document.querySelector("#new-estimate").addEventListener("click", newEstimate);
+document.querySelector("#new-estimate").addEventListener("click", () => requestDraftReplacement(newEstimate));
 document.querySelector("#copy-estimate").addEventListener("click", copyEstimate);
 estimate.addEventListener("input", (event) => {
   if (event.target.matches("input, select, textarea") && event.target.id !== "copy-text") saveDraft();
@@ -452,3 +677,4 @@ if (!restoreDraft()) {
 }
 draftReady = true;
 loadCatalog();
+loadHistory();

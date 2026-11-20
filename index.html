@@ -107,18 +107,57 @@
     </section>
     <p class="print-only signature">Подпись ____________________</p>
     <div class="document-actions">
+      <button type="button" id="save-history" class="secondary-button">Сохранить в историю</button>
+      <button type="button" id="open-history" class="secondary-button">Мои сметы</button>
       <button type="button" id="new-estimate" class="secondary-button">Новая смета</button>
       <button type="button" id="copy-estimate" class="secondary-button">Скопировать для WhatsApp</button>
       <button type="button" id="save-pdf" class="add-button">Сохранить PDF</button>
     </div>
     <p id="copy-status" class="action-status" role="status" aria-live="polite"></p>
     <p id="storage-status" class="action-status" role="status" hidden></p>
+    <p id="history-save-status" class="action-status" role="status"></p>
     <div id="manual-copy" class="card manual-copy" hidden>
       <label for="copy-text">Скопируйте текст вручную</label>
       <p id="copy-help">Автоматическое копирование недоступно. Выделите текст и скопируйте его сочетанием Ctrl+C или через меню телефона.</p>
       <textarea id="copy-text" rows="10" readonly aria-describedby="copy-help"></textarea>
     </div>
   </main>
+
+  <dialog id="history-dialog" aria-labelledby="history-title">
+    <div class="catalog-heading">
+      <h2 id="history-title">Мои сметы</h2>
+      <button type="button" id="close-history" class="delete-button" aria-label="Закрыть историю">✕</button>
+    </div>
+    <label for="history-search">Поиск по номеру или клиенту</label>
+    <input type="search" id="history-search" placeholder="Номер сметы или название клиента" autocomplete="off">
+    <p class="catalog-status">Сначала показаны последние изменённые сметы.</p>
+    <p id="history-status" class="catalog-status" role="status"></p>
+    <p id="history-empty" class="catalog-empty"></p>
+    <ul id="history-list" class="catalog-list"></ul>
+  </dialog>
+
+  <dialog id="unsaved-dialog" aria-labelledby="unsaved-title" aria-describedby="unsaved-description">
+    <h2 id="unsaved-title">Сохранить изменения?</h2>
+    <p id="unsaved-description">В текущей смете есть изменения, не сохранённые в историю. Сохраните их перед переходом или отмените действие.</p>
+    <p id="unsaved-status" role="status"></p>
+    <div class="catalog-actions">
+      <button type="button" id="save-and-continue" class="secondary-button">Сохранить и продолжить</button>
+      <button type="button" id="cancel-replace" class="secondary-button" autofocus>Отмена</button>
+    </div>
+  </dialog>
+
+  <template id="history-entry-template">
+    <li class="catalog-entry">
+      <h3 data-history-title></h3>
+      <p data-history-client></p>
+      <p data-history-total></p>
+      <div class="catalog-actions">
+        <button type="button" class="secondary-button" data-history-action="open">Открыть</button>
+        <button type="button" class="secondary-button" data-history-action="copy">Создать копию</button>
+        <button type="button" class="secondary-button" data-history-action="delete">Удалить</button>
+      </div>
+    </li>
+  </template>
 
   <dialog id="catalog-dialog" aria-labelledby="catalog-title">
     <div class="catalog-heading">
