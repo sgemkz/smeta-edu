@@ -16,6 +16,12 @@ const estimate = document.querySelector(".estimate");
 const draftKey = "smeta-5-minutes-draft-v1";
 const catalogKey = "smeta-5-minutes-catalog-v1";
 const historyKey = "smeta-5-minutes-history-v1";
+const settingsKey = "smeta-5-minutes-settings-v1";
+const importRecoveryKey = "smeta-5-minutes-import-recovery-v1";
+const importDialog = document.querySelector("#import-dialog");
+const importFile = document.querySelector("#import-file");
+let pendingBackup = null;
+let importSequence = 0;
 const statisticsFrom = document.querySelector("#statistics-from");
 const statisticsTo = document.querySelector("#statistics-to");
 const statisticsCurrency = document.querySelector("#statistics-currency");
@@ -347,6 +353,245 @@ async function copyEstimate() {
   }
 }
 
+function backupNotice(message) {
+  document.querySelector("#backup-status").textContent = message;
+  document.querySelector("#import-status").textContent = message;
+}
+
+function validDate(value) {
+  if (value === "") return true;
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function readSettings() {
+  return { version: 1, statistics: { currency: statisticsCurrency.value, from: statisticsFrom.value, to: statisticsTo.value } };
+}
+
+function validSettings(settings) {
+  return settings && settings.version === 1 && settings.statistics &&
+    ["₸", "₽", "$", "€"].includes(settings.statistics.currency) &&
+    validDate(settings.statistics.from) && validDate(settings.statistics.to);
+}
+
+function applySettings(settings) {
+  statisticsCurrency.value = settings.statistics.currency;
+  statisticsFrom.value = settings.statistics.from;
+  statisticsTo.value = settings.statistics.to;
+}
+
+function loadSettings() {
+  try {
+    const raw = window.localStorage.getItem(settingsKey);
+    if (!raw) return;
+    const settings = JSON.parse(raw);
+    if (validSettings(settings)) applySettings(settings);
+    else backupNotice("Не удалось прочитать настройки. Данные смет и каталога не изменены.");
+  } catch {
+    backupNotice("Не удалось прочитать настройки из хранилища браузера.");
+  }
+}
+
+function saveSettings() {
+  try {
+    window.localStorage.setItem(settingsKey, JSON.stringify(readSettings()));
+  } catch {
+    backupNotice("Браузер не разрешил сохранить настройки. Их можно включить в экспорт данных.");
+  }
+}
+
+function cleanBackupSnapshot(snapshot) {
+  if (!validSnapshot(snapshot) || !validDate(snapshot.fields.date)) throw new Error("Некорректные данные сметы в файле.");
+  const normalized = migrateSnapshot(snapshot);
+  return {
+    version: 1,
+    fields: Object.fromEntries(Object.keys(savedFields).map((key) => [key, normalized.fields[key]])),
+    items: normalized.items.map((row) => ({ name: row.name, quantity: row.quantity, unit: row.unit, price: row.price })),
+  };
+}
+
+function validateBackup(data) {
+  if (!data || data.format !== "smeta-5-minutes-backup") throw new Error("Это не резервная копия приложения «Смета за 5 минут».");
+  if (data.version !== 1) throw new Error("Эта версия резервной копии не поддерживается.");
+  if (typeof data.exportedAt !== "string" || !Number.isFinite(Date.parse(data.exportedAt)) ||
+      !Array.isArray(data.estimates) || !Array.isArray(data.catalog) || !validSettings(data.settings)) {
+    throw new Error("В файле отсутствуют обязательные данные или настройки имеют неверный формат.");
+  }
+  const estimates = data.estimates.map((entry) => {
+    if (!entry || typeof entry.id !== "string" || !entry.id.trim() || !Number.isSafeInteger(entry.updatedAt) || entry.updatedAt < 0) {
+      throw new Error("Некорректный ID или дата изменения сметы в файле.");
+    }
+    return { id: entry.id, updatedAt: entry.updatedAt, snapshot: cleanBackupSnapshot(entry.snapshot) };
+  });
+  const products = data.catalog.map((item) => {
+    if (!item || typeof item.id !== "string" || !item.id.trim() || typeof item.name !== "string" || !item.name.trim() ||
+        typeof item.price !== "string" || !["шт", "час", "услуга"].includes(item.unit)) {
+      throw new Error("Некорректные данные товара или услуги в файле.");
+    }
+    return { id: item.id, name: item.name, unit: item.unit, price: item.price };
+  });
+  if (new Set(estimates.map((entry) => entry.id)).size !== estimates.length ||
+      new Set(products.map((item) => item.id)).size !== products.length) {
+    throw new Error("В файле есть повторяющиеся ID смет или товаров.");
+  }
+  const draft = cleanBackupSnapshot(data.draft);
+  if (data.draft.historyId !== null && typeof data.draft.historyId !== "string") throw new Error("Некорректная связь черновика с историей.");
+  draft.historyId = estimates.some((entry) => entry.id === data.draft.historyId) ? data.draft.historyId : null;
+  return {
+    format: data.format, version: 1, exportedAt: data.exportedAt, estimates, catalog: products, draft,
+    settings: { version: 1, statistics: { currency: data.settings.statistics.currency, from: data.settings.statistics.from, to: data.settings.statistics.to } },
+  };
+}
+
+function createBackup() {
+  recalculate();
+  return validateBackup({
+    format: "smeta-5-minutes-backup", version: 1, exportedAt: new Date().toISOString(),
+    estimates: estimateHistory, catalog,
+    draft: { ...readSnapshot(), historyId: activeHistoryId }, settings: readSettings(),
+  });
+}
+
+function exportData() {
+  let url;
+  try {
+    const backup = createBackup();
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json;charset=utf-8" });
+    url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `smeta-backup-${todayValue()}.json`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    backupNotice(`Файл подготовлен к скачиванию. Смет: ${backup.estimates.length}, товаров и услуг: ${backup.catalog.length}.`);
+  } catch {
+    backupNotice("Не удалось подготовить резервную копию. Данные в браузере не изменены.");
+  } finally {
+    if (url) window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+}
+
+const importStorageKeys = [historyKey, catalogKey, draftKey, settingsKey];
+
+function recoverInterruptedImport() {
+  try {
+    const raw = window.localStorage.getItem(importRecoveryKey);
+    if (raw === null) return true;
+    const recovery = JSON.parse(raw);
+    if (!recovery || recovery.version !== 1 || !recovery.previous ||
+        !importStorageKeys.every((key) => recovery.previous[key] === null || typeof recovery.previous[key] === "string")) {
+      backupNotice("Не удалось прочитать данные восстановления импорта. Текущие данные не изменены.");
+      return false;
+    }
+    // Сначала освобождаем место; копия прежних значений остаётся в журнале до конца отката.
+    for (const key of importStorageKeys) window.localStorage.removeItem(key);
+    for (const key of importStorageKeys) {
+      if (recovery.previous[key] !== null) window.localStorage.setItem(key, recovery.previous[key]);
+    }
+    window.localStorage.removeItem(importRecoveryKey);
+    return true;
+  } catch {
+    backupNotice("Браузер не разрешил восстановить данные после прерванного импорта. Повторите открытие приложения, когда хранилище станет доступно.");
+    return false;
+  }
+}
+
+function writeImportedData(values) {
+  if (!recoverInterruptedImport()) return false;
+  try {
+    const previous = Object.fromEntries(importStorageKeys.map((key) => [key, window.localStorage.getItem(key)]));
+    window.localStorage.setItem(importRecoveryKey, JSON.stringify({ version: 1, previous }));
+    for (const key of importStorageKeys) window.localStorage.setItem(key, values[key]);
+    window.localStorage.removeItem(importRecoveryKey);
+    return true;
+  } catch {
+    if (recoverInterruptedImport()) backupNotice("Импорт не выполнен: не удалось записать данные в браузере. Прежние данные сохранены. Возможно, закончилось место в хранилище.");
+    return false;
+  }
+}
+
+function mergeById(current, incoming) {
+  const ids = new Set(current.map((entry) => entry.id));
+  return [...current, ...incoming.filter((entry) => !ids.has(entry.id))];
+}
+
+function finishImport(mode) {
+  const backup = pendingBackup;
+  if (!backup) return;
+  if (mode === "replace" && !window.confirm("Заменить все сохранённые сметы, каталог, настройки и текущий черновик данными из файла? Это действие перезапишет текущие данные.")) return;
+  const nextHistory = mode === "merge" ? mergeById(estimateHistory, backup.estimates) : backup.estimates;
+  const nextCatalog = mode === "merge" ? mergeById(catalog, backup.catalog) : backup.catalog;
+  const nextDraft = mode === "merge" ? { ...readSnapshot(), historyId: activeHistoryId } : backup.draft;
+  const settings = mode === "merge" ? readSettings() : backup.settings;
+  const values = {
+    [historyKey]: JSON.stringify({ version: 1, estimates: nextHistory }),
+    [catalogKey]: JSON.stringify({ version: 1, items: nextCatalog }),
+    [draftKey]: JSON.stringify(nextDraft),
+    [settingsKey]: JSON.stringify(settings),
+  };
+  if (!writeImportedData(values)) return;
+  estimateHistory = nextHistory;
+  catalog = nextCatalog;
+  if (mode === "replace") {
+    // Данные уже записаны целиком. Восстанавливаем форму без повторной записи по одной строке.
+    draftReady = false;
+    lastPayment = null;
+    activeHistoryId = nextDraft.historyId;
+    for (const [key, field] of Object.entries(savedFields)) field.value = nextDraft.fields[key];
+    items.replaceChildren();
+    nextItemId = 0;
+    resetCopy();
+    for (const row of nextDraft.items) addItem(false, row);
+    draftReady = true;
+    recalculate();
+    applySettings(settings);
+  }
+  cancelCatalogEdit();
+  renderCatalog();
+  renderHistory();
+  renderStatistics();
+  importDialog.close();
+  backupNotice(`Импорт завершён: ${mode === "merge" ? "данные объединены" : "данные заменены"}. Всего смет: ${nextHistory.length}, товаров и услуг: ${nextCatalog.length}.`);
+}
+
+document.querySelector("#export-data").addEventListener("click", exportData);
+document.querySelector("#import-data").addEventListener("click", () => importFile.click());
+document.querySelector("#merge-data").addEventListener("click", () => finishImport("merge"));
+document.querySelector("#replace-data").addEventListener("click", () => finishImport("replace"));
+document.querySelector("#cancel-import").addEventListener("click", () => importDialog.close());
+importDialog.addEventListener("close", () => { pendingBackup = null; });
+importFile.addEventListener("change", async () => {
+  const file = importFile.files[0];
+  if (!file) return;
+  const sequence = ++importSequence;
+  pendingBackup = null;
+  let contents;
+  try {
+    contents = await file.text();
+  } catch {
+    if (sequence === importSequence) backupNotice("Не удалось прочитать файл. Выберите доступный JSON-файл резервной копии.");
+    importFile.value = "";
+    return;
+  }
+  if (sequence !== importSequence) return;
+  try {
+    let data;
+    try { data = JSON.parse(contents.replace(/^\uFEFF/, "")); }
+    catch { throw new Error("Файл повреждён или не является корректным JSON. Текущие данные не изменены."); }
+    pendingBackup = validateBackup(data);
+    document.querySelector("#import-summary").textContent = `Найдено смет: ${pendingBackup.estimates.length}. Товаров и услуг: ${pendingBackup.catalog.length}. Также найдены текущий черновик и настройки.`;
+    document.querySelector("#import-status").textContent = "";
+    importDialog.showModal();
+  } catch (error) {
+    pendingBackup = null;
+    backupNotice(error.message);
+  } finally {
+    importFile.value = "";
+  }
+});
+
 function historyNotice(message) {
   document.querySelector("#history-status").textContent = message;
   document.querySelector("#history-save-status").textContent = message;
@@ -438,6 +683,7 @@ function renderStatistics() {
 for (const filter of [statisticsFrom, statisticsTo, statisticsCurrency]) {
   filter.addEventListener("input", renderStatistics);
   filter.addEventListener("change", renderStatistics);
+  filter.addEventListener("change", saveSettings);
 }
 
 function nextUniqueNumber(sourceNumber) {
@@ -806,6 +1052,7 @@ items.addEventListener("click", (event) => {
   else addButton.focus();
 });
 
+recoverInterruptedImport();
 if (!restoreDraft()) {
   savedFields.date.value = todayValue();
   addItem(false);
@@ -814,4 +1061,5 @@ draftReady = true;
 recalculate();
 loadCatalog();
 loadHistory();
+loadSettings();
 renderStatistics();

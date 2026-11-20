@@ -184,6 +184,32 @@
     </div>
   </section>
 
+  <section class="backup-section" aria-labelledby="backup-title">
+    <div class="card">
+      <h2 id="backup-title">Резервная копия данных</h2>
+      <p class="statistics-description">Сохраните сметы, каталог, текущий черновик и настройки в JSON-файл, чтобы перенести их в другой браузер.</p>
+      <div class="catalog-actions">
+        <button type="button" id="export-data" class="secondary-button">Экспорт данных</button>
+        <button type="button" id="import-data" class="secondary-button">Импорт данных</button>
+      </div>
+      <input type="file" id="import-file" accept=".json,application/json" hidden>
+      <p id="backup-status" class="statistics-description" role="status"></p>
+    </div>
+  </section>
+
+  <dialog id="import-dialog" aria-labelledby="import-title" aria-describedby="import-summary">
+    <h2 id="import-title">Импорт данных</h2>
+    <p id="import-summary"></p>
+    <p class="statistics-description">Объединить: добавить новые записи, сохранив текущие записи с совпадающими ID, черновик и настройки.</p>
+    <p class="statistics-description">Заменить: восстановить сметы, каталог, черновик и настройки из файла вместо текущих данных.</p>
+    <p id="import-status" role="status"></p>
+    <div class="catalog-actions">
+      <button type="button" id="merge-data" class="secondary-button">Объединить</button>
+      <button type="button" id="replace-data" class="secondary-button">Заменить</button>
+      <button type="button" id="cancel-import" class="secondary-button" autofocus>Отмена</button>
+    </div>
+  </dialog>
+
   <template id="statistics-status-template">
     <li>
       <div class="statistics-bar-label"><span data-statistics-status></span><span data-statistics-count></span></div>
