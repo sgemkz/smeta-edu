@@ -7,6 +7,7 @@ const totalOutput = document.querySelector("#total");
 const discountInput = document.querySelector("#discount");
 const vatInput = document.querySelector("#vat");
 const currencySelect = document.querySelector("#currency");
+const printButton = document.querySelector("#save-pdf");
 const moneyFormatter = new Intl.NumberFormat("ru-RU", {
   maximumFractionDigits: 0,
 });
@@ -74,6 +75,38 @@ function addItem(focusName = true) {
   recalculate();
   if (focusName) row.querySelector('[data-field="name"]').focus();
 }
+
+function preparePrint() {
+  recalculate();
+  const number = document.querySelector('[name="estimate-number"]').value.trim();
+  const date = document.querySelector("#estimate-date").value;
+  const formattedDate = date ? date.split("-").reverse().join(".") : "—";
+  document.querySelector("#print-title").textContent = `Смета № ${number || "—"} от ${formattedDate}`;
+  // Текстовые копии не обрезают длинные значения, как поля ввода при печати.
+  for (const field of document.querySelectorAll(".details-grid input, #items input, #items select")) {
+    let text = field.nextElementSibling;
+    if (!text || !text.classList.contains("print-value")) {
+      text = document.createElement("span");
+      text.className = "print-value";
+      text.setAttribute("aria-hidden", "true");
+      field.after(text);
+    }
+    if (field.dataset.field === "price") {
+      text.textContent = formatMoney(parseNumber(field.value));
+    } else if (field.dataset.field === "quantity") {
+      text.textContent = String(parseNumber(field.value)).replace(".", ",");
+    } else {
+      text.textContent = field.type === "date" ? (date ? formattedDate : "") : field.value;
+    }
+  }
+  document.querySelector("#print-comment").textContent = document.querySelector("#comment").value;
+}
+
+printButton.addEventListener("click", () => {
+  preparePrint();
+  window.print();
+});
+window.addEventListener("beforeprint", preparePrint);
 
 addButton.addEventListener("click", () => addItem());
 discountInput.addEventListener("input", recalculate);
