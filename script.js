@@ -7,6 +7,10 @@ const totalOutput = document.querySelector("#total");
 const discountInput = document.querySelector("#discount");
 const vatInput = document.querySelector("#vat");
 const currencySelect = document.querySelector("#currency");
+const statusInput = document.querySelector("#estimate-status");
+const paidInput = document.querySelector("#paid-amount");
+const estimateStatuses = ["Черновик", "Отправлена", "Согласована", "Частично оплачена", "Оплачена", "Отклонена"];
+let lastPayment = null;
 const printButton = document.querySelector("#save-pdf");
 const estimate = document.querySelector(".estimate");
 const draftKey = "smeta-5-minutes-draft-v1";
@@ -34,6 +38,8 @@ const savedFields = {
   vat: vatInput,
   currency: currencySelect,
   comment: document.querySelector("#comment"),
+  status: statusInput,
+  paid: paidInput,
 };
 let draftReady = false;
 let copyTimer;
@@ -73,6 +79,52 @@ function calculateAdjustments(amount, discountRate, vatRate) {
   return { subtotal, discount, discounted, vat, total: roundAmount(discounted + vat) };
 }
 
+function snapshotTotal(snapshot) {
+  const subtotal = snapshot.items.reduce((sum, row) =>
+    sum + roundAmount(parseNumber(row.quantity) * parseNumber(row.price)), 0);
+  return calculateAdjustments(subtotal, snapshot.fields.discount, snapshot.fields.vat).total;
+}
+
+function paymentAmounts(total, rawPaid) {
+  const due = Math.max(0, roundAmount(total));
+  const paid = Math.min(due, Math.max(0, roundAmount(parseNumber(rawPaid))));
+  const percent = due > 0 ? (paid === due ? 100 : Math.min(99.99, Math.round(paid / due * 10000) / 100)) : 0;
+  return { paid, remaining: roundAmount(due - paid), percent };
+}
+
+function statusFromPayment(total, paid, status) {
+  if (total > 0 && paid >= total) return "Оплачена";
+  if (paid > 0) return "Частично оплачена";
+  return ["Оплачена", "Частично оплачена"].includes(status) ? "Черновик" : status;
+}
+
+function updatePayment(total) {
+  // При восстановлении сначала загружаем все позиции, затем ограничиваем оплату.
+  if (!draftReady) return;
+  const { paid, remaining, percent } = paymentAmounts(total, paidInput.value);
+  const rawPaid = parseNumber(paidInput.value);
+  if (rawPaid !== paid || !paidInput.value.trim()) paidInput.value = String(paid);
+  if (lastPayment && (lastPayment.total !== total || lastPayment.paid !== paid)) {
+    statusInput.value = statusFromPayment(total, paid, statusInput.value);
+  }
+  lastPayment = { total, paid };
+  document.querySelector("#remaining").textContent = formatMoney(remaining);
+  document.querySelector("#payment-percent").textContent = `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(percent)} %`;
+  document.querySelector("#print-status").textContent = statusInput.value;
+  document.querySelector("#print-paid").textContent = formatMoney(paid);
+}
+
+function migrateSnapshot(snapshot) {
+  const normalized = { ...snapshot, fields: { status: "Черновик", paid: "0", ...snapshot.fields } };
+  const total = snapshotTotal(normalized);
+  const { paid } = paymentAmounts(total, normalized.fields.paid);
+  if (parseNumber(normalized.fields.paid) !== paid) {
+    normalized.fields.status = statusFromPayment(total, paid, normalized.fields.status);
+  }
+  normalized.fields.paid = String(paid);
+  return normalized;
+}
+
 function recalculate() {
   let total = 0;
   for (const row of items.rows) {
@@ -89,6 +141,7 @@ function recalculate() {
   updateSummaryRow("#discounted-row", "#discounted-amount", discounted);
   updateSummaryRow("#vat-row", "#vat-amount", vat);
   totalOutput.textContent = formatMoney(discounted + vat);
+  updatePayment(roundAmount(discounted + vat));
   for (const symbol of document.querySelectorAll("[data-currency]")) {
     symbol.textContent = currencySelect.value;
   }
@@ -163,7 +216,9 @@ function readSnapshot() {
 
 function validSnapshot(draft) {
   return draft && draft.version === 1 && draft.fields && Array.isArray(draft.items) &&
-    Object.keys(savedFields).every((key) => typeof draft.fields[key] === "string") &&
+    Object.keys(savedFields).every((key) => typeof draft.fields[key] === "string" ||
+      (["status", "paid"].includes(key) && draft.fields[key] === undefined)) &&
+    (draft.fields.status === undefined || estimateStatuses.includes(draft.fields.status)) &&
     ["₸", "₽", "$", "€"].includes(draft.fields.currency) &&
     draft.items.every((row) => row && ["name", "quantity", "unit", "price"].every((key) => typeof row[key] === "string") &&
       ["шт", "час", "услуга"].includes(row.unit));
@@ -190,8 +245,10 @@ function restoreDraft() {
   }
   if (!raw) return false;
   try {
-    const draft = JSON.parse(raw);
-    if (!validSnapshot(draft)) return false;
+    const rawDraft = JSON.parse(raw);
+    if (!validSnapshot(rawDraft)) return false;
+    const draft = migrateSnapshot(rawDraft);
+    lastPayment = null;
     activeHistoryId = typeof draft.historyId === "string" ? draft.historyId : null;
     for (const [key, field] of Object.entries(savedFields)) field.value = draft.fields[key];
     for (const row of draft.items) addItem(false, row);
@@ -227,11 +284,15 @@ function newEstimate() {
   discountInput.value = "0";
   vatInput.value = "0";
   currencySelect.value = "₸";
+  statusInput.value = "Черновик";
+  paidInput.value = "0";
+  lastPayment = null;
   items.replaceChildren();
   nextItemId = 0;
   resetCopy();
   addItem();
   draftReady = true;
+  recalculate();
   saveDraft();
 }
 
@@ -300,7 +361,7 @@ function loadHistory() {
       historyNotice("Не удалось прочитать историю смет. Текущий черновик доступен.");
       return;
     }
-    estimateHistory = data.estimates;
+    estimateHistory = data.estimates.map((entry) => ({ ...entry, snapshot: migrateSnapshot(entry.snapshot) }));
   } catch {
     historyNotice("История недоступна в хранилище браузера. Текущий черновик доступен.");
   }
@@ -341,6 +402,7 @@ function historyEntry(snapshot, id = null) {
 }
 
 function saveCurrentHistory() {
+  recalculate();
   const snapshot = readSnapshot();
   if (!snapshot.fields.number.trim()) snapshot.fields.number = nextUniqueNumber("0");
   const existing = estimateHistory.find((entry) => entry.id === activeHistoryId);
@@ -370,7 +432,7 @@ function hasUnsavedChanges() {
   if (saved) return snapshotKey(current) !== snapshotKey(saved.snapshot);
   const f = current.fields;
   return Boolean(f.sender || f.recipient || f.number || f.comment || f.discount !== "0" ||
-    f.vat !== "0" || f.currency !== "₸" || f.date !== todayValue() ||
+    f.vat !== "0" || f.currency !== "₸" || f.date !== todayValue() || f.status !== "Черновик" || parseNumber(f.paid) !== 0 ||
     current.items.some((row) => row.name || row.quantity || row.price || row.unit !== "шт"));
 }
 
@@ -386,6 +448,7 @@ function requestDraftReplacement(action) {
 
 function applyHistorySnapshot(snapshot, id) {
   draftReady = false;
+  lastPayment = null;
   activeHistoryId = id;
   for (const [key, field] of Object.entries(savedFields)) field.value = snapshot.fields[key];
   items.replaceChildren();
@@ -394,6 +457,7 @@ function applyHistorySnapshot(snapshot, id) {
   for (const row of snapshot.items) addItem(false, row);
   recalculate();
   draftReady = true;
+  recalculate();
   saveDraft();
   historyDialog.close();
   savedFields.recipient.focus();
@@ -412,14 +476,17 @@ function renderHistory() {
     ? "Здесь пока нет смет. Заполните смету и нажмите «Сохранить в историю»."
     : "Сметы не найдены. Попробуйте другой номер или название клиента.";
   for (const entry of found) {
-    const { fields, items: rows } = entry.snapshot;
+    const { fields } = entry.snapshot;
     const card = document.querySelector("#history-entry-template").content.firstElementChild.cloneNode(true);
     const title = `Смета № ${fields.number || "—"} от ${fields.date ? fields.date.split("-").reverse().join(".") : "—"}`;
-    const sum = rows.reduce((amount, row) => amount + roundAmount(parseNumber(row.quantity) * parseNumber(row.price)), 0);
-    const total = calculateAdjustments(sum, fields.discount, fields.vat).total;
+    const total = snapshotTotal(entry.snapshot);
     card.querySelector("[data-history-title]").textContent = title;
     card.querySelector("[data-history-client]").textContent = `Клиент: ${fields.recipient || "Не указан"}`;
     card.querySelector("[data-history-total]").textContent = `Итого к оплате: ${formatMoney(total, fields.currency)}`;
+    const badge = card.querySelector("[data-history-status]");
+    badge.textContent = fields.status;
+    badge.dataset.status = fields.status;
+    card.dataset.status = fields.status;
     for (const button of card.querySelectorAll("button")) {
       button.dataset.historyId = entry.id;
       button.setAttribute("aria-label", `${button.textContent}: ${title}, ${fields.recipient || "клиент не указан"}`);
@@ -626,12 +693,18 @@ catalogList.addEventListener("click", (event) => {
 
 document.querySelector("#new-estimate").addEventListener("click", () => requestDraftReplacement(newEstimate));
 document.querySelector("#copy-estimate").addEventListener("click", copyEstimate);
-estimate.addEventListener("input", (event) => {
-  if (event.target.matches("input, select, textarea") && event.target.id !== "copy-text") saveDraft();
-});
-estimate.addEventListener("change", (event) => {
-  if (event.target.matches("input, select, textarea") && event.target.id !== "copy-text") saveDraft();
-});
+function handleEstimateChange(event) {
+  if (!event.target.matches("input, select, textarea") || event.target.id === "copy-text") return;
+  const paymentChanged = event.target === paidInput || event.target === statusInput;
+  if (paymentChanged) recalculate();
+  saveDraft();
+  // Запись оплаты для открытой сохранённой сметы сразу обновляет её историю.
+  if (paymentChanged && estimateHistory.some((entry) => entry.id === activeHistoryId) && hasUnsavedChanges()) {
+    saveCurrentHistory();
+  }
+}
+estimate.addEventListener("input", handleEstimateChange);
+estimate.addEventListener("change", handleEstimateChange);
 
 printButton.addEventListener("click", () => {
   preparePrint();
@@ -676,5 +749,6 @@ if (!restoreDraft()) {
   addItem(false);
 }
 draftReady = true;
+recalculate();
 loadCatalog();
 loadHistory();

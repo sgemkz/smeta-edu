@@ -98,6 +98,31 @@
         <h2 id="total-title">Итого к оплате</h2>
         <output id="total" aria-labelledby="total-title" aria-live="polite" aria-atomic="true">0 ₸</output>
       </div>
+      <div class="card payment-card" aria-labelledby="payment-title">
+        <h2 id="payment-title">Статус и оплата</h2>
+        <div class="payment-fields">
+          <label for="estimate-status">Статус
+            <select id="estimate-status" aria-describedby="payment-hint">
+              <option>Черновик</option>
+              <option>Отправлена</option>
+              <option>Согласована</option>
+              <option>Частично оплачена</option>
+              <option>Оплачена</option>
+              <option>Отклонена</option>
+            </select>
+          </label>
+          <label for="paid-amount">Оплачено, <span data-currency>₸</span>
+            <input type="text" id="paid-amount" inputmode="decimal" value="0" autocomplete="off" spellcheck="false" aria-describedby="payment-hint">
+          </label>
+        </div>
+        <p id="payment-hint">Оплата — от 0 до итога сметы. При изменении суммы оплаты или итога статус обновляется автоматически.</p>
+        <dl class="payment-summary" aria-live="polite" aria-atomic="true">
+          <div class="summary-row print-only"><dt>Статус</dt><dd id="print-status">Черновик</dd></div>
+          <div class="summary-row print-only"><dt>Оплачено</dt><dd id="print-paid">0 ₸</dd></div>
+          <div class="summary-row"><dt id="remaining-label">Остаток к оплате</dt><dd><output id="remaining" aria-labelledby="remaining-label">0 ₸</output></dd></div>
+          <div class="summary-row"><dt id="payment-percent-label">Процент оплаты</dt><dd><output id="payment-percent" aria-labelledby="payment-percent-label">0 %</output></dd></div>
+        </dl>
+      </div>
     </section>
 
     <section class="card comment-card" aria-labelledby="comment-label">
@@ -149,6 +174,7 @@
   <template id="history-entry-template">
     <li class="catalog-entry">
       <h3 data-history-title></h3>
+      <span class="status-badge" data-history-status></span>
       <p data-history-client></p>
       <p data-history-total></p>
       <div class="catalog-actions">
