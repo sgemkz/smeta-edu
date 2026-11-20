@@ -103,7 +103,16 @@
     </section>
     <p class="print-only signature">Подпись ____________________</p>
     <div class="document-actions">
+      <button type="button" id="new-estimate" class="secondary-button">Новая смета</button>
+      <button type="button" id="copy-estimate" class="secondary-button">Скопировать для WhatsApp</button>
       <button type="button" id="save-pdf" class="add-button">Сохранить PDF</button>
+    </div>
+    <p id="copy-status" class="action-status" role="status" aria-live="polite"></p>
+    <p id="storage-status" class="action-status" role="status" hidden></p>
+    <div id="manual-copy" class="card manual-copy" hidden>
+      <label for="copy-text">Скопируйте текст вручную</label>
+      <p id="copy-help">Автоматическое копирование недоступно. Выделите текст и скопируйте его сочетанием Ctrl+C или через меню телефона.</p>
+      <textarea id="copy-text" rows="10" readonly aria-describedby="copy-help"></textarea>
     </div>
   </main>
 
