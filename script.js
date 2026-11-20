@@ -16,6 +16,9 @@ const estimate = document.querySelector(".estimate");
 const draftKey = "smeta-5-minutes-draft-v1";
 const catalogKey = "smeta-5-minutes-catalog-v1";
 const historyKey = "smeta-5-minutes-history-v1";
+const statisticsFrom = document.querySelector("#statistics-from");
+const statisticsTo = document.querySelector("#statistics-to");
+const statisticsCurrency = document.querySelector("#statistics-currency");
 const historyDialog = document.querySelector("#history-dialog");
 const historySearch = document.querySelector("#history-search");
 const historyList = document.querySelector("#history-list");
@@ -371,11 +374,70 @@ function storeHistory(nextHistory) {
   try {
     window.localStorage.setItem(historyKey, JSON.stringify({ version: 1, estimates: nextHistory }));
     estimateHistory = nextHistory;
+    renderStatistics();
     return true;
   } catch {
     historyNotice("Не удалось сохранить историю в браузере. Текущая смета не заменена.");
     return false;
   }
+}
+
+function calculateStatistics(entries, currency, from, to) {
+  const counts = Object.fromEntries(estimateStatuses.map((status) => [status, 0]));
+  const result = { count: 0, total: 0, approved: 0, paid: 0, remaining: 0, counts };
+  if (from && to && from > to) return result;
+  for (const { snapshot } of entries) {
+    const { fields } = snapshot;
+    if (fields.currency !== currency || (from && (!fields.date || fields.date < from)) ||
+        (to && (!fields.date || fields.date > to))) continue;
+    const total = snapshotTotal(snapshot);
+    const payment = paymentAmounts(total, fields.paid);
+    result.count++;
+    result.total += total;
+    result.paid += payment.paid;
+    if (fields.status === "Согласована") result.approved += total;
+    if (!["Отклонена", "Отменена"].includes(fields.status)) result.remaining += payment.remaining;
+    counts[fields.status] = (counts[fields.status] || 0) + 1;
+  }
+  for (const key of ["total", "approved", "paid", "remaining"]) result[key] = roundAmount(result[key]);
+  return result;
+}
+
+function renderStatistics() {
+  const currency = statisticsCurrency.value;
+  const from = statisticsFrom.value;
+  const to = statisticsTo.value;
+  const data = calculateStatistics(estimateHistory, currency, from, to);
+  document.querySelector("#statistics-count").textContent = String(data.count);
+  for (const key of ["total", "approved", "paid", "remaining"]) {
+    document.querySelector(`#statistics-${key}`).textContent = formatMoney(data[key], currency);
+  }
+  document.querySelector("#statistics-message").textContent = from && to && from > to
+    ? "Дата начала периода должна быть не позже даты окончания. Исправьте даты."
+    : estimateHistory.length === 0
+      ? "Пока нет сохранённых смет. Нажмите «Сохранить в историю», чтобы увидеть статистику."
+      : data.count === 0
+        ? "За выбранный период в этой валюте смет нет. Попробуйте изменить фильтры."
+        : `Найдено смет: ${data.count}. Валюта: ${currency}.`;
+  const chart = document.querySelector("#statistics-chart");
+  const template = document.querySelector("#statistics-status-template");
+  chart.replaceChildren();
+  const percentFormatter = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 });
+  for (const [status, count] of Object.entries(data.counts)) {
+    const entry = template.content.firstElementChild.cloneNode(true);
+    const percent = data.count ? count / data.count * 100 : 0;
+    entry.querySelector("[data-statistics-status]").textContent = status;
+    entry.querySelector("[data-statistics-count]").textContent = `${count} (${percentFormatter.format(percent)} %)`;
+    const bar = entry.querySelector("[data-statistics-bar]");
+    bar.dataset.status = status;
+    bar.style.width = `${percent}%`;
+    chart.append(entry);
+  }
+}
+
+for (const filter of [statisticsFrom, statisticsTo, statisticsCurrency]) {
+  filter.addEventListener("input", renderStatistics);
+  filter.addEventListener("change", renderStatistics);
 }
 
 function nextUniqueNumber(sourceNumber) {
@@ -752,3 +814,4 @@ draftReady = true;
 recalculate();
 loadCatalog();
 loadHistory();
+renderStatistics();

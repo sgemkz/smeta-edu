@@ -109,6 +109,26 @@ dialog::backdrop { background: rgb(32 41 56 / 45%); }
 .total-card h2 { font-size: 18px; }
 #total { color: var(--accent); font-size: clamp(28px, 4vw, 38px); font-weight: 750; letter-spacing: -.035em; overflow-wrap: anywhere; min-width: 0; text-align: right; }
 .visually-hidden, .cell-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.statistics { width: min(1120px, 100%); padding: 0 24px 48px; margin: 0 auto; }
+.statistics > h2 { font-size: 28px; }
+.statistics-description { color: var(--muted); font-size: 14px; line-height: 1.6; }
+.statistics-filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+#statistics-message { margin-bottom: 0; }
+.statistics-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 0 0 24px; }
+.statistics-cards .card { margin: 0; padding: 22px; min-width: 0; }
+.statistics-cards dt { color: var(--muted); font-size: 14px; line-height: 1.5; }
+.statistics-cards dd { margin: 12px 0 0; font-size: clamp(22px, 2.5vw, 28px); font-weight: 750; overflow-wrap: anywhere; }
+.statistics h3 { margin: 0 0 24px; font-size: 18px; }
+.statistics-chart { list-style: none; padding: 0; margin: 0; }
+.statistics-chart li + li { margin-top: 18px; }
+.statistics-bar-label { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 8px; font-size: 14px; }
+.statistics-bar-label span:last-child { flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.statistics-bar-track { height: 12px; border-radius: 6px; background: #edf0f5; overflow: hidden; }
+.statistics-bar { height: 100%; width: 0; background: var(--accent); border-radius: inherit; }
+.statistics-bar[data-status="Оплачена"] { background: #27864f; }
+.statistics-bar[data-status="Частично оплачена"] { background: #c57a16; }
+.statistics-bar[data-status="Черновик"] { background: #7b879b; }
+.statistics-bar[data-status="Отклонена"], .statistics-bar[data-status="Отменена"] { background: #8c6681; }
 
 @media screen and (min-width: 641px) and (max-width: 900px) {
   .estimate { padding-inline: 16px; }
@@ -121,6 +141,8 @@ dialog::backdrop { background: rgb(32 41 56 / 45%); }
 
 @media screen and (max-width: 640px) {
   .estimate { padding: 28px 16px; }
+  .statistics { padding: 0 16px 28px; }
+  .statistics-filters, .statistics-cards { grid-template-columns: minmax(0, 1fr); }
   .page-header { margin-bottom: 24px; }
   .card { padding: 20px 16px; border-radius: 14px; margin-bottom: 16px; }
   .details-grid { grid-template-columns: minmax(0, 1fr); gap: 18px; margin-top: 20px; }
@@ -153,7 +175,7 @@ dialog::backdrop { background: rgb(32 41 56 / 45%); }
   :root { color: #000; background: #fff; font-size: 10pt; }
   body { margin: 0; background: #fff; }
   .estimate { width: 100%; margin: 0; padding: 0; }
-  .page-header, button, .document-actions, .calculation-settings, .action-status, .manual-copy, .position-actions, dialog,
+  .page-header, button, .document-actions, .calculation-settings, .action-status, .manual-copy, .position-actions, dialog, .statistics,
   #keyboard-hint, .delete-cell, th:last-child,
   .estimate input, .estimate select, .estimate textarea,
   .cell-label { display: none !important; }

@@ -148,6 +148,49 @@
     </div>
   </main>
 
+  <section id="statistics" class="statistics" aria-labelledby="statistics-title">
+    <h2 id="statistics-title">Статистика</h2>
+    <p class="statistics-description">По сохранённым сметам в выбранной валюте. Период учитывается по дате сметы, включая обе границы.</p>
+    <div class="card">
+      <div class="statistics-filters">
+        <label for="statistics-from">Дата с
+          <input type="date" id="statistics-from">
+        </label>
+        <label for="statistics-to">Дата по
+          <input type="date" id="statistics-to">
+        </label>
+        <label for="statistics-currency">Валюта статистики
+          <select id="statistics-currency">
+            <option value="₸">₸</option>
+            <option value="₽">₽</option>
+            <option value="$">$</option>
+            <option value="€">€</option>
+          </select>
+        </label>
+      </div>
+      <p id="statistics-message" class="statistics-description" role="status"></p>
+    </div>
+    <dl class="statistics-cards">
+      <div class="card"><dt id="statistics-count-label">Всего смет</dt><dd><output id="statistics-count" aria-labelledby="statistics-count-label">0</output></dd></div>
+      <div class="card"><dt id="statistics-total-label">Общая сумма</dt><dd><output id="statistics-total" aria-labelledby="statistics-total-label">0 ₸</output></dd></div>
+      <div class="card"><dt id="statistics-approved-label">Согласовано</dt><dd><output id="statistics-approved" aria-labelledby="statistics-approved-label">0 ₸</output></dd></div>
+      <div class="card"><dt id="statistics-paid-label">Получено оплат</dt><dd><output id="statistics-paid" aria-labelledby="statistics-paid-label">0 ₸</output></dd></div>
+      <div class="card"><dt id="statistics-remaining-label">Остаток к оплате</dt><dd><output id="statistics-remaining" aria-labelledby="statistics-remaining-label">0 ₸</output></dd></div>
+    </dl>
+    <div class="card">
+      <h3 id="statistics-chart-title">Распределение смет по статусам</h3>
+      <ul id="statistics-chart" class="statistics-chart" aria-labelledby="statistics-chart-title"></ul>
+      <p class="statistics-description">«Согласовано» — сумма смет со статусом «Согласована». Остаток к оплате — ожидаемые поступления без отклонённых и отменённых смет.</p>
+    </div>
+  </section>
+
+  <template id="statistics-status-template">
+    <li>
+      <div class="statistics-bar-label"><span data-statistics-status></span><span data-statistics-count></span></div>
+      <div class="statistics-bar-track" aria-hidden="true"><div class="statistics-bar" data-statistics-bar></div></div>
+    </li>
+  </template>
+
   <dialog id="history-dialog" aria-labelledby="history-title">
     <div class="catalog-heading">
       <h2 id="history-title">Мои сметы</h2>
